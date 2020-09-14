@@ -41,6 +41,228 @@ class Fetcher:
         preprocessed_df = self._preprocess(data)
         return Evaluation(preprocessed_df, eval_id=self._abs_eval_id)
 
+class GoogleStorageFetcher(Fetcher):
+    """
+    Represents a download and preprocessor of test results from
+    'google cloud storage'.
+
+    Parameters
+    ----------
+    eval_num : int
+        An integer that specifies the evaluation to download.
+    project : str, optional
+        The project name to use when fetch from Google Cloud Storage. By default fpga-tool-perf
+    jobset : str, optional
+        The jobset name to use when fetching from Google Cloud Storage. By default continuous.
+    """
+    def __init__(
+        self,
+        eval_num: int,
+        project: str = "fpga-tool-perf",
+        jobset: str = "continuous",
+        mapping: dict = None,
+        hydra_clock_names: list = None
+    ) -> None:
+        super().__init__() # inits self._abs_eval_id
+        self.eval_num = eval_num
+        self.project = project
+        self.jobset = jobset
+        self.mapping = mapping
+        self.hydra_clock_names = hydra_clock_names
+
+    def _get_builds(self, eval_num: int, params: str = "") -> List[str]:
+        """
+        Function that returns a list of paths to download given an eval_num.
+
+        Parameters
+        ----------
+        eval_num : int
+            An integer that specifies the evaluation to download. Functionality
+            differs depending on whether `absolute_eval_num` is True
+        params : str
+            A string of query parameters used when fetching the evaluations.
+            Most commonly used for pagination. By default, "".
+
+        Returns
+        -------
+        List[int]
+            A list of paths to download that correspond with the eval_num
+
+        Raises
+        ------
+        ConnectionError
+            Raised if the HTTP request to get the evaluations fails.
+        IndexError
+            Raised if the relative eval_num is not valid.
+        ValueError
+            Raised if the eval_num has no associated builds.
+        """
+        resp = requests.get(
+            f"https://storage.googleapis.com/{self.project}?prefix=artifacts/prod/foss-fpga-tools/fpga-tool-perf/{self.jobset}/{eval_num}/",
+            headers={"Content-Type": "application/xml"},
+        )
+	# Example response
+        #<ListBucketResult xmlns="http://doc.s3.amazonaws.com/2006-03-01">
+	#    <Name>fpga-tool-perf</Name>
+	#	<Prefix>artifacts/prod/foss-fpga-tools/fpga-tool-perf/continuous/20/</Prefix>
+	#	<Marker/>
+	#	<IsTruncated>false</IsTruncated>
+	#    <Contents>
+	#	<Key>artifacts/prod/foss-fpga-tools/fpga-tool-perf/continuous/20/20200501-003622/github/fpga-tool-perf/build/blinky_nextpnr_xc7_a35tcsg324-1_arty_xdc_carry-n/meta.json</Key>
+	#	<Generation>1588320917187037</Generation>
+	#	<MetaGeneration>2</MetaGeneration>
+	#	<LastModified>2020-05-01T08:15:17.186Z</LastModified>
+	#	<ETag>"4db18bb15d6c921e54c73b53bab1d3d1"</ETag>
+	#	<Size>1652</Size>
+	#    </Contents>
+        if resp.status_code != 200:
+            raise ConnectionError("Unable to get evals from server.")
+
+        from xml.etree import ElementTree as ET
+        from io import StringIO
+        # See https://bugs.python.org/issue18304
+        # strip xml namespaces from tags
+        it = ET.iterparse(StringIO(resp.content.decode("utf-8")))
+        for _, el in it:
+            _, _, el.tag = el.tag.rpartition('}')
+        # Use tree without namespaces as root
+        root = it.root
+        prefix = ""
+        is_truncated = True # assume by default, that it is truncated
+        meta_urls = []
+        for child in root:
+            if child.tag == "Prefix":
+                prefix = child.text
+            elif child.tag == "IsTruncated":
+                is_truncated = False if child.text == "false" else True
+            elif child.tag == "Contents":
+                if prefix == "":
+                    raise ValueError("Empty prefix? Expected to parse prefix before contents")
+                for key in child:
+                    if key.tag == "Key":
+                        if str(key.text).endswith("meta.json"):
+                            meta_urls += [key.text]
+
+        #TODO: if data is truncated, download next part
+        #assert is_truncated == False
+        # now we have all urls of meta.json in meta_urls
+        # example data:
+        # artifacts/prod/foss-fpga-tools/fpga-tool-perf/continuous/50/20200720-083124/github/fpga-tool-perf/build/vexriscv-verilog_yosys-vivado_xc7_a35tcpg236-1_basys3_generic_000_xdc_carry-n/meta.json
+
+        return meta_urls
+
+    def _download(self) -> List[Dict]:
+        """
+        Fetches data from Google Cloud Storage, returning a list of decoded meta.json dicts
+        corresponding to the builds of the eval_num evaluation.
+
+        Returns
+        -------
+        List[Dict]
+            A list of dictionaries that represent the decoded meta.json files
+            of each test result.
+
+        Raises
+        ------
+        ConnectionError
+            Raised if `hydra.vtr.tools` returns a non-200 status code when
+            fetching evals.
+
+        IndexError
+            Raised if the specified eval_num is invalid due to it being too
+            large.
+
+        """
+        # get build numbers from eval_num
+        meta_urls = self._get_builds(self.eval_num)
+
+        # fetch build info and download 'meta.json'
+        data = []
+        for meta_url in meta_urls:
+            # get build info
+            resp = requests.get(
+                    f"https://storage.googleapis.com/{self.project}/{meta_url}",
+                    headers={"Content-Type": "application/json"},
+            )
+            if resp.status_code != 200:
+                print(
+                    "Warning:",
+                    f"Unable to get build {meta_url} file.",
+                )
+                continue
+            try:
+                data.append(resp.json())
+            except json.decoder.JSONDecodeError:
+                print("Warning:", f"Unable to decode build {meta_url}")
+
+        if len(data) == 0:
+            raise ValueError(f"Unable to get any successful builds from eval_num {self.eval_num}.")
+
+        return data
+
+    def _preprocess(self, data: List[Dict]) -> pd.DataFrame:
+        """
+        Using data from _download(), processes and standardizes the data and
+        returns a Pandas DataFrame.
+        """
+        flattened_data = [Helpers.flatten(x) for x in data]
+
+        processed_data = []
+        for row in flattened_data:
+            legacy_icestorm = self._check_legacy_icebreaker(row)
+            processed_row = {}
+            if self.mapping is None:
+                processed_row = row
+            else:
+                for in_col_name, out_col_name in self.mapping.items():
+                    processed_row[out_col_name] = row[in_col_name]
+
+            actual_freq = Helpers.get_actual_freq(row, self.hydra_clock_names)
+            if actual_freq:
+                # freq in MHz, no change needed, newest fpga-tool-perf build reports freq in MHz
+                #TODO: change old builds from Hz to MHz
+                processed_row["freq"] = actual_freq
+            else:
+                processed_row["freq"] = 0.0
+            processed_row.update(Helpers.get_versions(row))
+            processed_data.append(processed_row)
+
+        return pd.DataFrame(processed_data).dropna(axis=1, how="all")
+
+    def _check_legacy_icebreaker(self, row):
+        """
+        Returns True if row is from a test on an Icebreaker board before Jul 31,
+        2020.
+
+        This is useful because these legacy tests recorded frequency in MHz
+        instead of Hz, while all other boards record in Hz. This flag can be
+        used to check if the units need to be changed.
+
+        Parameters
+        ----------
+        row : dict
+            a dictionary that is the result of decoding a meta.json file
+
+        Returns
+        -------
+        bool
+            Returns true if row is icebreaker board before Aug 1, 2020. False
+            otherwise.
+        """
+        date = None
+        board = None
+        try:
+            date = row["date"] # format: 2020-07-17T22:12:41
+            board = row["board"]
+            timestamp = datetime.strptime(date, "%Y-%m-%dT%H:%M:%S")
+            return timestamp < datetime(2020, 7, 31) and board == "icebreaker"
+        except KeyError:
+            print("Warning: Unable to find date and board in meta.json, required for supporting legacy Icebreaker.")
+            return False # Assume not legacy icebreaker
+
+    def get_evaluation(self) -> Evaluation:
+        return super().get_evaluation()
+
 
 class HydraFetcher(Fetcher):
     """
