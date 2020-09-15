@@ -645,3 +645,14 @@ class CompareToFirst(Processor):
         input_df = input_eval.get_df()
         new_df = self._compare_to_first(input_df)
         return Evaluation(new_df, input_eval.get_eval_id())
+
+class FilterBuildType(Processor):
+
+    def __init__(self, build_type):
+        self.build_type = build_type
+
+    def process(self, input_eval: Evaluation) -> Evaluation:
+        input_df = input_eval.get_df()
+
+        new_df = input_df[input_df['build_type'] == self.build_type]
+        return Evaluation(new_df, input_eval.get_eval_id())
