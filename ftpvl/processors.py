@@ -656,3 +656,15 @@ class FilterBuildType(Processor):
 
         new_df = input_df[input_df['build_type'] == self.build_type]
         return Evaluation(new_df, input_eval.get_eval_id())
+
+class FilterBuildNumber(Processor):
+
+    def __init__(self, build_number):
+        self.build_number = build_number
+
+    def process(self, input_eval: Evaluation) -> Evaluation:
+        input_df = input_eval.get_df()
+
+        new_df = input_df[input_df['build'] == self.build_number]
+        return Evaluation(new_df, input_eval.get_eval_id())
+
