@@ -675,3 +675,16 @@ class FilterBuildNumber(Processor):
         new_df = input_df[input_df['build'] == self.build_number].reset_index(drop=True)
         return Evaluation(new_df, input_eval.get_eval_id())
 
+class SortValues(Processor):
+
+    def __init__(self, names: List[str], ascending = False):
+        self.names = names
+        self.ascending = ascending
+
+    def process(self, input_eval: Evaluation) -> Evaluation:
+        input_df = input_eval.get_df()
+
+        new_df = input_df.sort_values(by = self.names, ascending = self.ascending).reset_index(drop=True)
+        return Evaluation(new_df, input_eval.get_eval_id())
+
+
