@@ -731,4 +731,22 @@ class SortValues(Processor):
         new_df = input_df.sort_values(by = self.names, ascending = self.ascending).reset_index(drop=True)
         return Evaluation(new_df, input_eval.get_eval_id())
 
+class GroupBy(Processor):
+
+    def __init__(self, groupby: List[str]):
+        self.groupby = groupby
+
+    def filter(self, input_df: pd.DataFrame):
+
+        mask = [True] * len(input_df)
+
+        input_df = input_df[mask]
+
+        return input_df
+
+    def process(self, input_eval: Evaluation) -> Evaluation:
+        input_df = input_eval.get_df()
+
+        new_df = input_df.groupby(self.groupby).apply(self.filter)
+        return Evaluation(new_df, input_eval.get_eval_id())
 
