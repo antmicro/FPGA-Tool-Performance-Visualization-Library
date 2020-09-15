@@ -128,6 +128,50 @@ class CleanDuplicates(Processor):
             )
             return Evaluation(new_df, input_eval.get_eval_id())
 
+class MaximaMinimaFilter(Processor):
+    """
+    Processor that lefts only maximum and minimum value from groupby column
+
+    Parameters
+    ----------
+    groupby : List[str]
+        list of column names to groupby
+
+    input_col_name : str
+        name of column, that only rows with max/min values will not be removed
+    """
+
+    def __init__(self, groupby: List[str], input_col_name: str):
+        self.groupby = groupby
+        self.input_col_name = input_col_name
+
+    def filter(self, input_df: pd.DataFrame):
+        max_val = input_df[self.input_col_name].max()
+        min_val = input_df[self.input_col_name].min()
+
+        mask = [False] * len(input_df)
+
+        i = 0
+        for val in input_df[self.input_col_name]:
+            if val == max_val:
+                mask[i] = True
+                max_val = None # use only first occurance of max val
+            elif val == min_val:
+                mask[i] = True
+                min_val = None # use only first occurance of min val
+            i = i + 1
+
+        input_df = input_df[mask]
+
+        return input_df
+
+
+    def process(self, input_eval: Evaluation) -> Evaluation:
+        input_df = input_eval.get_df()
+        new_df = input_df.groupby(self.groupby).apply(self.filter)
+
+        return Evaluation(new_df, input_eval.get_eval_id())
+
 
 class AddNormalizedColumn(Processor):
     """
