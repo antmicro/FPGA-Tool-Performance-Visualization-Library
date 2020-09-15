@@ -158,7 +158,7 @@ class AddNormalizedColumn(Processor):
 
     def __init__(
         self,
-        groupby: str,
+        groupby: List[str],
         input_col_name: str,
         output_col_name: str,
         direction: Direction = Direction.MAXIMIZE
