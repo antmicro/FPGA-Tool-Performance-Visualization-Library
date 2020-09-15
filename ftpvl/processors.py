@@ -435,6 +435,9 @@ class RelativeDiff(Processor):
         The evaluation to use when comparing against the Evaluation that is
         being processed. Corresponds to evaluation A in the description.
 
+    add_cols : int
+        Number of columns from the begining to append to resulted DataFrame
+
     Examples
     --------
     >>> a = Evaluation(pd.DataFrame(
@@ -453,13 +456,17 @@ class RelativeDiff(Processor):
     1 -0.5 -0.8
     """
 
-    def __init__(self, a: Evaluation):
+    def __init__(self, a: Evaluation, add_cols: int = None):
         self.a = a
+        self.add_cols = add_cols
 
     def process(self, b: Evaluation) -> Evaluation:
         a_nums = self.a.get_df().select_dtypes(include=[np.number])
         b_nums = b.get_df().select_dtypes(include=[np.number])
         diff = (b_nums - a_nums) / a_nums
+        if self.add_cols:
+            diff = self.a.get_df().iloc[:,:self.add_cols].join(diff)
+
         difference_eval = Evaluation(diff)
 
         return difference_eval
@@ -654,7 +661,7 @@ class FilterBuildType(Processor):
     def process(self, input_eval: Evaluation) -> Evaluation:
         input_df = input_eval.get_df()
 
-        new_df = input_df[input_df['build_type'] == self.build_type]
+        new_df = input_df[input_df['build_type'] == self.build_type].reset_index(drop=True)
         return Evaluation(new_df, input_eval.get_eval_id())
 
 class FilterBuildNumber(Processor):
@@ -665,6 +672,6 @@ class FilterBuildNumber(Processor):
     def process(self, input_eval: Evaluation) -> Evaluation:
         input_df = input_eval.get_df()
 
-        new_df = input_df[input_df['build'] == self.build_number]
+        new_df = input_df[input_df['build'] == self.build_number].reset_index(drop=True)
         return Evaluation(new_df, input_eval.get_eval_id())
 
