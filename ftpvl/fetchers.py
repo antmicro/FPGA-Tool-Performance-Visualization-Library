@@ -92,62 +92,27 @@ class GoogleStorageFetcher(Fetcher):
         ------
         ConnectionError
             Raised if the HTTP request to get the evaluations fails.
-        IndexError
-            Raised if the relative eval_num is not valid.
-        ValueError
-            Raised if the eval_num has no associated builds.
         """
-        resp = requests.get(
-            f"https://storage.googleapis.com/{self.project}?prefix=artifacts/prod/foss-fpga-tools/fpga-tool-perf/{self.jobset}/{eval_num}/",
-            headers={"Content-Type": "application/xml"},
-        )
-	# Example response
-        #<ListBucketResult xmlns="http://doc.s3.amazonaws.com/2006-03-01">
-	#    <Name>fpga-tool-perf</Name>
-	#	<Prefix>artifacts/prod/foss-fpga-tools/fpga-tool-perf/continuous/20/</Prefix>
-	#	<Marker/>
-	#	<IsTruncated>false</IsTruncated>
-	#    <Contents>
-	#	<Key>artifacts/prod/foss-fpga-tools/fpga-tool-perf/continuous/20/20200501-003622/github/fpga-tool-perf/build/blinky_nextpnr_xc7_a35tcsg324-1_arty_xdc_carry-n/meta.json</Key>
-	#	<Generation>1588320917187037</Generation>
-	#	<MetaGeneration>2</MetaGeneration>
-	#	<LastModified>2020-05-01T08:15:17.186Z</LastModified>
-	#	<ETag>"4db18bb15d6c921e54c73b53bab1d3d1"</ETag>
-	#	<Size>1652</Size>
-	#    </Contents>
-        if resp.status_code != 200:
-            raise ConnectionError("Unable to get evals from server.")
-
-        from xml.etree import ElementTree as ET
-        from io import StringIO
-        # See https://bugs.python.org/issue18304
-        # strip xml namespaces from tags
-        it = ET.iterparse(StringIO(resp.content.decode("utf-8")))
-        for _, el in it:
-            _, _, el.tag = el.tag.rpartition('}')
-        # Use tree without namespaces as root
-        root = it.root
-        prefix = ""
-        is_truncated = True # assume by default, that it is truncated
+        base_api_path = f"https://www.googleapis.com/storage/v1/b/{self.project}/o"
+        base_download_path = f"https://storage.googleapis.com/{self.project}/"
+        next_page_token = ""
         meta_urls = []
-        for child in root:
-            if child.tag == "Prefix":
-                prefix = child.text
-            elif child.tag == "IsTruncated":
-                is_truncated = False if child.text == "false" else True
-            elif child.tag == "Contents":
-                if prefix == "":
-                    raise ValueError("Empty prefix? Expected to parse prefix before contents")
-                for key in child:
-                    if key.tag == "Key":
-                        if str(key.text).endswith("meta.json"):
-                            meta_urls += [key.text]
-
-        #TODO: if data is truncated, download next part
-        #assert is_truncated == False
-        # now we have all urls of meta.json in meta_urls
-        # example data:
-        # artifacts/prod/foss-fpga-tools/fpga-tool-perf/continuous/50/20200720-083124/github/fpga-tool-perf/build/vexriscv-verilog_yosys-vivado_xc7_a35tcpg236-1_basys3_generic_000_xdc_carry-n/meta.json
+        while True:
+            req_url = f"{base_api_path}?delimiter=meta.json&prefix=artifacts/prod/foss-fpga-tools/fpga-tool-perf/{self.jobset}/{eval_num}{next_page_token}"
+            print(f"Trying to download meta.json files from: {req_url}...")
+            resp = requests.get(
+                req_url,
+                headers={"Content-Type": "application/json"},
+            )
+            if resp.status_code != 200:
+                raise ConnectionError(f"Unable to get evals from server. Status code: {resp.status_code}")
+            evals_json = resp.json()
+            for prefix in evals_json["prefixes"]:
+                meta_urls += [base_download_path + prefix]
+            try:
+                next_page_token = "&pageToken=" + evals_json["nextPageToken"]
+            except KeyError:
+                break
 
         return meta_urls
 
@@ -164,13 +129,8 @@ class GoogleStorageFetcher(Fetcher):
 
         Raises
         ------
-        ConnectionError
-            Raised if `hydra.vtr.tools` returns a non-200 status code when
-            fetching evals.
-
-        IndexError
-            Raised if the specified eval_num is invalid due to it being too
-            large.
+        ValueError
+            Raised when fetcher wont find any successful builds from eval_num
 
         """
         # get build numbers from eval_num
@@ -181,13 +141,13 @@ class GoogleStorageFetcher(Fetcher):
         for meta_url in meta_urls:
             # get build info
             resp = requests.get(
-                    f"https://storage.googleapis.com/{self.project}/{meta_url}",
+                    meta_url,
                     headers={"Content-Type": "application/json"},
             )
             if resp.status_code != 200:
                 print(
                     "Warning:",
-                    f"Unable to get build {meta_url} file.",
+                    f"Unable to get build {meta_url} file. Status code: {resp.status_code}",
                 )
                 continue
             try:
