@@ -698,8 +698,15 @@ class CompareToFirst(Processor):
         return Evaluation(new_df, input_eval.get_eval_id())
 
 class FilterBuildType(Processor):
+    """
+    Processor that filters data based on build type.
 
-    def __init__(self, build_type):
+    Parameters
+    ----------
+    build_type : str
+        a build type string that will contain filtered Evaluation
+    """
+    def __init__(self, build_type: str):
         self.build_type = build_type
 
     def process(self, input_eval: Evaluation) -> Evaluation:
@@ -709,8 +716,16 @@ class FilterBuildType(Processor):
         return Evaluation(new_df, input_eval.get_eval_id())
 
 class FilterBuildNumber(Processor):
+    """
+    Processor that filters data based on build number.
 
-    def __init__(self, build_number):
+    Parameters
+    ----------
+    build_number : str
+        a build number that will contain filtered Evaluation
+    """
+
+    def __init__(self, build_number: int):
         self.build_number = build_number
 
     def process(self, input_eval: Evaluation) -> Evaluation:
@@ -720,7 +735,17 @@ class FilterBuildNumber(Processor):
         return Evaluation(new_df, input_eval.get_eval_id())
 
 class SortValues(Processor):
+    """
+    Processor that sorts data based on values.
 
+    Parameters
+    ----------
+    names : List[str]
+        list of column names by what values Evaluation will be sorted
+
+    ascending : bool
+        should it sort in ascending order or not
+    """
     def __init__(self, names: List[str], ascending = False):
         self.names = names
         self.ascending = ascending
@@ -732,6 +757,14 @@ class SortValues(Processor):
         return Evaluation(new_df, input_eval.get_eval_id())
 
 class GroupBy(Processor):
+    """
+    Processor that groups by list of column names.
+
+    Parameters
+    ----------
+    groupby : List[str]
+        list of column names that it should be grouped by
+    """
 
     def __init__(self, groupby: List[str]):
         self.groupby = groupby
