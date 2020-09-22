@@ -130,7 +130,7 @@ class CleanDuplicates(Processor):
 
 class MaximaMinimaFilter(Processor):
     """
-    Processor that lefts only maximum and minimum value from groupby column
+    Processor that leaves only maximum and minimum value from groupby column
 
     Parameters
     ----------
@@ -151,15 +151,13 @@ class MaximaMinimaFilter(Processor):
 
         mask = [False] * len(input_df)
 
-        i = 0
-        for val in input_df[self.input_col_name]:
+        for index, val in enumerate(input_df[self.input_col_name]):
             if val == max_val:
-                mask[i] = True
+                mask[index] = True
                 max_val = None # use only first occurance of max val
             elif val == min_val:
-                mask[i] = True
+                mask[index] = True
                 min_val = None # use only first occurance of min val
-            i = i + 1
 
         input_df = input_df[mask]
 
