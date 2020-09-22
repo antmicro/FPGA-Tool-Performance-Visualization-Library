@@ -160,11 +160,23 @@ class GoogleStorageFetcher(Fetcher):
 
         return data
 
+    def _process_toolchain(self, data: List[Dict]) -> List[Dict]:
+        for index in range(len(data)):
+            for key, value in data[index]['toolchain'].items():
+                toolchain = key
+                pr_tool = value['pr_tool']
+                synthesis_tool = value['synthesis_tool']
+            data[index]['toolchain'] = toolchain
+            data[index]['pr_tool'] = pr_tool
+            data[index]['synthesis_tool'] = synthesis_tool
+        return data
+
     def _preprocess(self, data: List[Dict]) -> pd.DataFrame:
         """
         Using data from _download(), processes and standardizes the data and
         returns a Pandas DataFrame.
         """
+        self._process_toolchain(data)
         flattened_data = [Helpers.flatten(x) for x in data]
 
         processed_data = []
