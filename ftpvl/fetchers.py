@@ -63,7 +63,7 @@ class GoogleStorageFetcher(Fetcher):
         mapping: dict = None,
         hydra_clock_names: list = None
     ) -> None:
-        super().__init__() # inits self._abs_eval_id
+        self._abs_eval_id = eval_num
         self.eval_num = eval_num
         self.project = project
         self.jobset = jobset
