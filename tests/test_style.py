@@ -33,9 +33,9 @@ class TestStyle:
         expected = pd.DataFrame(
             [
                 {
-                    "a": "background-color: #8ed8d0",
-                    "b": "background-color: #bde8e3",
-                    "c": "background-color: #eaf7f6",
+                    "a": "background-color: #8ed6ce",
+                    "b": "background-color: #bce4df",
+                    "c": "background-color: #e9f1f0",
                 },
                 {
                     "a": "background-color: #f2f2f2",
@@ -43,9 +43,9 @@ class TestStyle:
                     "c": "background-color: #f2f2f2",
                 },
                 {
-                    "a": "background-color: #fbe8eb",
-                    "b": "background-color: #f7d1d9",
-                    "c": "background-color: #f3bac5",
+                    "a": "background-color: #f2efef",
+                    "b": "background-color: #f1d6db",
+                    "c": "background-color: #f0bcc6",
                 },
             ]
         )

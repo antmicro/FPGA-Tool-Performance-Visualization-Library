@@ -41,6 +41,168 @@ class Fetcher:
         preprocessed_df = self._preprocess(data)
         return Evaluation(preprocessed_df, eval_id=self._abs_eval_id)
 
+class GoogleStorageFetcher(Fetcher):
+    """
+    Represents a download and preprocessor of test results from
+    'google cloud storage'.
+
+    Parameters
+    ----------
+    eval_num : int
+        An integer that specifies the evaluation to download.
+    project : str, optional
+        The project name to use when fetch from Google Cloud Storage. By default fpga-tool-perf
+    jobset : str, optional
+        The jobset name to use when fetching from Google Cloud Storage. By default continuous.
+    """
+    def __init__(
+        self,
+        eval_num: int,
+        project: str = "fpga-tool-perf",
+        jobset: str = "continuous",
+        mapping: dict = None,
+        hydra_clock_names: list = None
+    ) -> None:
+        self._abs_eval_id = eval_num
+        self.eval_num = eval_num
+        self.project = project
+        self.jobset = jobset
+        self.mapping = mapping
+        self.hydra_clock_names = hydra_clock_names
+
+    def _get_builds(self, eval_num: int, params: str = "") -> List[str]:
+        """
+        Function that returns a list of paths to download given an eval_num.
+
+        Parameters
+        ----------
+        eval_num : int
+            An integer that specifies the evaluation to download. Functionality
+            differs depending on whether `absolute_eval_num` is True
+        params : str
+            A string of query parameters used when fetching the evaluations.
+            Most commonly used for pagination. By default, "".
+
+        Returns
+        -------
+        List[int]
+            A list of paths to download that correspond with the eval_num
+
+        Raises
+        ------
+        ConnectionError
+            Raised if the HTTP request to get the evaluations fails.
+        """
+        base_api_path = f"https://www.googleapis.com/storage/v1/b/{self.project}/o"
+        base_download_path = f"https://storage.googleapis.com/{self.project}/"
+        next_page_token = ""
+        meta_urls = []
+        while True:
+            req_url = f"{base_api_path}?delimiter=meta.json&prefix=artifacts/prod/foss-fpga-tools/fpga-tool-perf/{self.jobset}/{eval_num}{next_page_token}"
+            print(f"Trying to download meta.json files from: {req_url}...")
+            resp = requests.get(
+                req_url,
+                headers={"Content-Type": "application/json"},
+            )
+            if resp.status_code != 200:
+                raise ConnectionError(f"Unable to get evals from server. Status code: {resp.status_code}")
+            evals_json = resp.json()
+            for prefix in evals_json["prefixes"]:
+                meta_urls += [base_download_path + prefix]
+            try:
+                next_page_token = "&pageToken=" + evals_json["nextPageToken"]
+            except KeyError:
+                break
+
+        return meta_urls
+
+    def _download(self) -> List[Dict]:
+        """
+        Fetches data from Google Cloud Storage, returning a list of decoded meta.json dicts
+        corresponding to the builds of the eval_num evaluation.
+
+        Returns
+        -------
+        List[Dict]
+            A list of dictionaries that represent the decoded meta.json files
+            of each test result.
+
+        Raises
+        ------
+        ValueError
+            Raised when fetcher wont find any successful builds from eval_num
+
+        """
+        # get build numbers from eval_num
+        meta_urls = self._get_builds(self.eval_num)
+
+        # fetch build info and download 'meta.json'
+        data = []
+        for meta_url in meta_urls:
+            # get build info
+            resp = requests.get(
+                    meta_url,
+                    headers={"Content-Type": "application/json"},
+            )
+            if resp.status_code != 200:
+                print(
+                    "Warning:",
+                    f"Unable to get build {meta_url} file. Status code: {resp.status_code}",
+                )
+                continue
+            try:
+                data.append(resp.json())
+            except json.decoder.JSONDecodeError:
+                print("Warning:", f"Unable to decode build {meta_url}")
+
+        if len(data) == 0:
+            raise ValueError(f"Unable to get any successful builds from eval_num {self.eval_num}.")
+
+        return data
+
+    def _process_toolchain(self, data: List[Dict]) -> List[Dict]:
+        for index in range(len(data)):
+            for key, value in data[index]['toolchain'].items():
+                toolchain = key
+                pr_tool = value['pr_tool']
+                synthesis_tool = value['synthesis_tool']
+            data[index]['toolchain'] = toolchain
+            data[index]['pr_tool'] = pr_tool
+            data[index]['synthesis_tool'] = synthesis_tool
+        return data
+
+    def _preprocess(self, data: List[Dict]) -> pd.DataFrame:
+        """
+        Using data from _download(), processes and standardizes the data and
+        returns a Pandas DataFrame.
+        """
+        self._process_toolchain(data)
+        flattened_data = [Helpers.flatten(x) for x in data]
+
+        processed_data = []
+        for row in flattened_data:
+            processed_row = {}
+            if self.mapping is None:
+                processed_row = row
+            else:
+                for in_col_name, out_col_name in self.mapping.items():
+                    processed_row[out_col_name] = row[in_col_name]
+
+            actual_freq = Helpers.get_actual_freq(row, self.hydra_clock_names)
+            if actual_freq:
+                # freq in MHz, no change needed, newest fpga-tool-perf build reports freq in MHz
+                #TODO: change old builds from Hz to MHz
+                processed_row["freq"] = actual_freq
+            else:
+                processed_row["freq"] = 0.0
+            processed_row.update(Helpers.get_versions(row))
+            processed_data.append(processed_row)
+
+        return pd.DataFrame(processed_data).dropna(axis=1, how="all")
+
+    def get_evaluation(self) -> Evaluation:
+        return super().get_evaluation()
+
 
 class HydraFetcher(Fetcher):
     """

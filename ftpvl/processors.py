@@ -128,6 +128,48 @@ class CleanDuplicates(Processor):
             )
             return Evaluation(new_df, input_eval.get_eval_id())
 
+class MaximaMinimaFilter(Processor):
+    """
+    Processor that leaves only maximum and minimum value from groupby column
+
+    Parameters
+    ----------
+    groupby : List[str]
+        list of column names to groupby
+
+    input_col_name : str
+        name of column, that only rows with max/min values will not be removed
+    """
+
+    def __init__(self, groupby: List[str], input_col_name: str):
+        self.groupby = groupby
+        self.input_col_name = input_col_name
+
+    def filter(self, input_df: pd.DataFrame):
+        max_val = input_df[self.input_col_name].max()
+        min_val = input_df[self.input_col_name].min()
+
+        mask = [False] * len(input_df)
+
+        for index, val in enumerate(input_df[self.input_col_name]):
+            if val == max_val:
+                mask[index] = True
+                max_val = None # use only first occurance of max val
+            elif val == min_val:
+                mask[index] = True
+                min_val = None # use only first occurance of min val
+
+        input_df = input_df[mask]
+
+        return input_df
+
+
+    def process(self, input_eval: Evaluation) -> Evaluation:
+        input_df = input_eval.get_df()
+        new_df = input_df.groupby(self.groupby).apply(self.filter)
+
+        return Evaluation(new_df, input_eval.get_eval_id())
+
 
 class AddNormalizedColumn(Processor):
     """
@@ -158,7 +200,7 @@ class AddNormalizedColumn(Processor):
 
     def __init__(
         self,
-        groupby: str,
+        groupby: List[str],
         input_col_name: str,
         output_col_name: str,
         direction: Direction = Direction.MAXIMIZE
@@ -435,6 +477,9 @@ class RelativeDiff(Processor):
         The evaluation to use when comparing against the Evaluation that is
         being processed. Corresponds to evaluation A in the description.
 
+    add_cols : int
+        Number of columns from the begining to append to resulted DataFrame
+
     Examples
     --------
     >>> a = Evaluation(pd.DataFrame(
@@ -453,13 +498,17 @@ class RelativeDiff(Processor):
     1 -0.5 -0.8
     """
 
-    def __init__(self, a: Evaluation):
+    def __init__(self, a: Evaluation, add_cols: int = None):
         self.a = a
+        self.add_cols = add_cols
 
     def process(self, b: Evaluation) -> Evaluation:
         a_nums = self.a.get_df().select_dtypes(include=[np.number])
         b_nums = b.get_df().select_dtypes(include=[np.number])
         diff = (b_nums - a_nums) / a_nums
+        if self.add_cols:
+            diff = self.a.get_df().iloc[:,:self.add_cols].join(diff)
+
         difference_eval = Evaluation(diff)
 
         return difference_eval
@@ -645,3 +694,90 @@ class CompareToFirst(Processor):
         input_df = input_eval.get_df()
         new_df = self._compare_to_first(input_df)
         return Evaluation(new_df, input_eval.get_eval_id())
+
+class FilterBuildType(Processor):
+    """
+    Processor that filters data based on build type.
+
+    Parameters
+    ----------
+    build_type : str
+        a build type string that will contain filtered Evaluation
+    """
+    def __init__(self, build_type: str):
+        self.build_type = build_type
+
+    def process(self, input_eval: Evaluation) -> Evaluation:
+        input_df = input_eval.get_df()
+
+        new_df = input_df[input_df['build_type'] == self.build_type].reset_index(drop=True)
+        return Evaluation(new_df, input_eval.get_eval_id())
+
+class FilterBuildNumber(Processor):
+    """
+    Processor that filters data based on build number.
+
+    Parameters
+    ----------
+    build_number : str
+        a build number that will contain filtered Evaluation
+    """
+
+    def __init__(self, build_number: int):
+        self.build_number = build_number
+
+    def process(self, input_eval: Evaluation) -> Evaluation:
+        input_df = input_eval.get_df()
+
+        new_df = input_df[input_df['build'] == self.build_number].reset_index(drop=True)
+        return Evaluation(new_df, input_eval.get_eval_id())
+
+class SortValues(Processor):
+    """
+    Processor that sorts data based on values.
+
+    Parameters
+    ----------
+    names : List[str]
+        list of column names by what values Evaluation will be sorted
+
+    ascending : bool
+        should it sort in ascending order or not
+    """
+    def __init__(self, names: List[str], ascending = False):
+        self.names = names
+        self.ascending = ascending
+
+    def process(self, input_eval: Evaluation) -> Evaluation:
+        input_df = input_eval.get_df()
+
+        new_df = input_df.sort_values(by = self.names, ascending = self.ascending).reset_index(drop=True)
+        return Evaluation(new_df, input_eval.get_eval_id())
+
+class GroupBy(Processor):
+    """
+    Processor that groups by list of column names.
+
+    Parameters
+    ----------
+    groupby : List[str]
+        list of column names that it should be grouped by
+    """
+
+    def __init__(self, groupby: List[str]):
+        self.groupby = groupby
+
+    def filter(self, input_df: pd.DataFrame):
+
+        mask = [True] * len(input_df)
+
+        input_df = input_df[mask]
+
+        return input_df
+
+    def process(self, input_eval: Evaluation) -> Evaluation:
+        input_df = input_eval.get_df()
+
+        new_df = input_df.groupby(self.groupby).apply(self.filter)
+        return Evaluation(new_df, input_eval.get_eval_id())
+

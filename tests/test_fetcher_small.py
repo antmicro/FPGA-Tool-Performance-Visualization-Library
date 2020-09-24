@@ -8,7 +8,113 @@ import requests_mock
 
 from pandas.testing import assert_frame_equal, assert_series_equal, assert_index_equal
 
-from ftpvl.fetchers import HydraFetcher, JSONFetcher
+from ftpvl.fetchers import HydraFetcher, JSONFetcher, GoogleStorageFetcher
+
+class TestGoogleStorageFetcherSmall(unittest.TestCase):
+    """
+    Testing by partition.
+
+    GoogleStorageFetcher:
+        __init__(eval_num, mapping_dict, hydra_clock_names)
+        get_evaluation()
+            different eval_num
+                relative, absolute
+            different mapping
+                exclusion, renaming
+            pagination
+            with/without board and date information
+    """
+
+    def test_googlestoragefetcher_init(self):
+        """
+        Calling init should save the arguments as an instance variable.
+        """
+        fetcher = GoogleStorageFetcher(
+            project="fpga-tool-perf",
+            jobset="presubmit",
+            eval_num=0,
+            mapping={"a": "c", "b": "d"},
+            hydra_clock_names=["clk", "clk1"]
+        )
+
+        self.assertEqual(fetcher.project, "fpga-tool-perf")
+        self.assertEqual(fetcher.jobset, "presubmit")
+        self.assertEqual(fetcher.eval_num, 0)
+        self.assertEqual(fetcher.mapping, {"a": "c", "b": "d"})
+        self.assertEqual(fetcher.hydra_clock_names, ["clk", "clk1"])
+
+    def test_googlestoragefetcher_get_evaluation_eval_num(self):
+        """
+        get_evaluation() should return an Evaluation corresponding to the small
+        dataset and the specified eval_num.
+
+        Tests eval_num functionality along with pagination
+        """
+        project = "fpga-tool-perf"
+        jobset = "presubmit"
+        eval_num = 100
+        next_page_token = ""
+        with requests_mock.Mocker() as m:
+            evals_fn = 'tests/sample_data/evals_googlestorage_small.json'
+            evals_fn2 = 'tests/sample_data/evals_googlestorage_small2.json'
+            evals_url = f'https://www.googleapis.com/storage/v1/b/{project}/o?delimiter=meta.json&prefix=artifacts/prod/foss-fpga-tools/fpga-tool-perf/{jobset}/{eval_num}'
+            base_download_path = f"https://storage.googleapis.com/{project}/"
+            build_num = 0
+            import json
+            # setup evals request mock
+            with open(evals_fn, "r") as f:
+                json_data = f.read()
+                json_dict = json.loads(json_data)
+                next_page_token = "&pageToken=" + json_dict["nextPageToken"]
+                m.get(evals_url, text=json_data)
+                for prefix in json_dict['prefixes']:
+                    payload = {
+                        "build_num": build_num,
+                        "date": "2020-07-17T22:12:40",
+                        "board": "arty",
+                        "toolchain": { "vivado": { "pr_tool": "vivado", "synthesis_tool": "vivado" } }
+                    }
+                    meta_url = f'{base_download_path}{prefix}'
+                    m.get(meta_url, json=payload)
+                    build_num += 1
+
+
+            # setup evals next page request mock
+            with open(evals_fn2, "r") as f:
+                json_data = f.read()
+                json_dict = json.loads(json_data)
+                m.get(evals_url + next_page_token, text=json_data)
+                for prefix in json_dict['prefixes']:
+                    payload = {
+                        "build_num": build_num,
+                        "date": "2020-07-17T22:12:40",
+                        "board": "arty",
+                        "toolchain": { "vivado": { "pr_tool": "vivado", "synthesis_tool": "vivado" } }
+                    }
+                    meta_url = f'{base_download_path}{prefix}'
+                    m.get(meta_url, json=payload)
+                    build_num += 1
+
+            # if mapping is not defined, should not remap, but it should split toolchain into pr/synthesis tool
+            gsf = GoogleStorageFetcher(
+                project="fpga-tool-perf",
+                jobset="presubmit",
+                eval_num=eval_num)
+            result = gsf.get_evaluation().get_df()
+
+            expected = pd.DataFrame({
+                "build_num": [x for x in range(0, 22)],
+                "date": ["2020-07-17T22:12:40" for _ in range(22)],
+                "board": ["arty" for _ in range(22)],
+                "toolchain": ["vivado" for _ in range(22)],
+                "pr_tool": ["vivado" for _ in range(22)],
+                "synthesis_tool": ["vivado" for _ in range(22)],
+                "freq": [0.0 for _ in range(22)]
+                })
+            assert_frame_equal(result, expected)
+
+            eval_id = gsf.get_evaluation().get_eval_id()
+            assert eval_id == eval_num
 
 class TestHydraFetcherSmall(unittest.TestCase):
     """
