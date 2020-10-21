@@ -94,19 +94,27 @@ class GoogleStorageFetcher(Fetcher):
             Raised if the HTTP request to get the evaluations fails.
         """
         base_api_path = f"https://www.googleapis.com/storage/v1/b/{self.project}/o"
+        prefix_param = f"artifacts/prod/foss-fpga-tools/{self.project}/{self.jobset}/"
         base_download_path = f"https://storage.googleapis.com/{self.project}/"
         next_page_token = ""
         meta_urls = []
+
         while True:
-            req_url = f"{base_api_path}?delimiter=meta.json&prefix=artifacts/prod/foss-fpga-tools/fpga-tool-perf/{self.jobset}/{eval_num}{next_page_token}"
+            req_url = f"{base_api_path}?delimiter=meta.json&prefix={prefix_param}{eval_num}{next_page_token}"
             print(f"Trying to download meta.json files from: {req_url}...")
             resp = requests.get(
                 req_url,
                 headers={"Content-Type": "application/json"},
             )
+
             if resp.status_code != 200:
                 raise ConnectionError(f"Unable to get evals from server. Status code: {resp.status_code}")
+
             evals_json = resp.json()
+
+            if "prefixes" not in evals_json:
+                raise KeyError(f"Build is empty! No artifacts were generated.")
+
             for prefix in evals_json["prefixes"]:
                 meta_urls += [base_download_path + prefix]
             try:
@@ -348,13 +356,13 @@ class HydraFetcher(Fetcher):
             )
             if resp.status_code != 200:
                 raise Exception(f"Unable to get build {build_num}, got status code {resp.status_code}.")
-            
+
             decoded = None
             try:
                 decoded = resp.json()
             except json.decoder.JSONDecodeError as err:
                 raise Exception(f"Unable to decode build {build_num} JSON file, {str(err)}")
-                
+
             # check if build was successful
             if decoded.get("buildstatus") != 0:
                 print(f"Warning: Build {build_num} failed with non-zero exit. Skipping...")
@@ -365,11 +373,11 @@ class HydraFetcher(Fetcher):
             for product_id, product_desc in decoded.get("buildproducts", {}).items():
                 if product_desc.get("name", "") == "meta.json":
                     meta_json_id = product_id
-            
+
             if meta_json_id is None:
                 print(f"Warning: Build {build_num} does not contain meta.json file. Skipping...")
                 continue
-            
+
             # download meta.json
             resp = requests.get(
                 f"https://hydra.vtr.tools/build/{build_num}/download/{meta_json_id}/meta.json",
@@ -450,7 +458,7 @@ class HydraFetcher(Fetcher):
             processed_data.append(processed_row)
 
         return pd.DataFrame(processed_data).dropna(axis=1, how="all")
-    
+
     def get_evaluation(self) -> Evaluation:
         return super().get_evaluation()
 
