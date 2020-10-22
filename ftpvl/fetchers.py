@@ -184,11 +184,12 @@ class GoogleStorageFetcher(Fetcher):
         Using data from _download(), processes and standardizes the data and
         returns a Pandas DataFrame.
         """
+
         self._process_toolchain(data)
         flattened_data = [Helpers.flatten(x) for x in data]
 
         processed_data = []
-        for row in flattened_data:
+        def process_data(row):
             processed_row = {}
             if self.mapping is None:
                 processed_row = row
@@ -196,15 +197,45 @@ class GoogleStorageFetcher(Fetcher):
                 for in_col_name, out_col_name in self.mapping.items():
                     processed_row[out_col_name] = row[in_col_name]
 
-            actual_freq = Helpers.get_actual_freq(row, self.hydra_clock_names)
-            if actual_freq:
-                # freq in MHz, no change needed, newest fpga-tool-perf build reports freq in MHz
-                #TODO: change old builds from Hz to MHz
-                processed_row["freq"] = actual_freq
-            else:
-                processed_row["freq"] = 0.0
             processed_row.update(Helpers.get_versions(row))
             processed_data.append(processed_row)
+
+        for row in flattened_data:
+            if row['toolchain'] == "nextpnr-ice40":
+                continue
+
+            clocks = {}
+            for col in row.keys():
+                parts = col.split('.')
+                is_max_freq = parts[0] == "max_freq"
+
+                if is_max_freq:
+                    clock_name = ".".join(parts[1:-1])
+                else:
+                    continue
+
+                if clock_name not in clocks.keys():
+                    clocks[clock_name] = {}
+
+                clocks[clock_name][parts[-1]] = row[col]
+
+            if clocks:
+                for k, v in clocks.items():
+                    row["clock_name"] = k
+
+                    for k2, v2 in v.items():
+                        row[k2] = v2
+
+                    process_data(row)
+            else:
+                row["clock_name"] = ""
+                row["actual"] = 0.0
+                row["requested"] = 0.0
+                row["met"] = False
+                row["hold_violation"] = 0.0
+                row["setup_violation"] = 0.0
+                process_data(row)
+
 
         return pd.DataFrame(processed_data).dropna(axis=1, how="all")
 
